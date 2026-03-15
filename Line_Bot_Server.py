@@ -9,8 +9,8 @@ from Test_AI import get_ai_analysis
 app = Flask(__name__)
 
 # 【修正】：這裡括號內必須是變數名稱，讓程式去 Render 的設定裡撈資料
-CHANNEL_ACCESS_TOKEN = os.environ.get("BteSrdaIB+E1biC82fx+pYO6aGuox4vj6BA4clTIWQehonm2aJYgrXynYWL+OLxCGVRB6yu0+FBXBZOVXMa6Bwm1LzZTqf++0QuHDuz9J1YOthtMzwhoLPxfhF21qoQaz5JRPyI0b6SryOp7wY6ihQdB04t89/1O/w1cDnyilFU=")
-CHANNEL_SECRET = os.environ.get("6a7107c2f4721cd0bf3f2207ebdd22ca")
+CHANNEL_ACCESS_TOKEN = os.environ.get("CHANNEL_ACCESS_TOKEN")
+CHANNEL_SECRET = os.environ.get("CHANNEL_SECRET")
 
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
