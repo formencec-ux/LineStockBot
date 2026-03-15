@@ -7,7 +7,7 @@ import os
 GEMINI_KEY = os.environ.get("GEMINI_KEY") 
 
 # 設定 API
-genai.configure(api_key=GEMINI_KEY, transport='rest')
+genai.configure(api_key=GEMINI_KEY)
 
 # 使用你清單中確認可用的模型
 model = genai.GenerativeModel('models/gemini-3-flash-preview')
