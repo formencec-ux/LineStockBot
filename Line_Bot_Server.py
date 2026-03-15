@@ -1,3 +1,5 @@
+import os
+import time
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
@@ -6,40 +8,64 @@ from Test_AI import get_ai_analysis
 
 app = Flask(__name__)
 
-# 填入你的 LINE Channel Access Token 和 Secret
-line_bot_api = LineBotApi('BteSrdaIB+E1biC82fx+pYO6aGuox4vj6BA4clTIWQehonm2aJYgrXynYWL+OLxCGVRB6yu0+FBXBZOVXMa6Bwm1LzZTqf++0QuHDuz9J1YOthtMzwhoLPxfhF21qoQaz5JRPyI0b6SryOp7wY6ihQdB04t89/1O/w1cDnyilFU=')
-handler = WebhookHandler('6a7107c2f4721cd0bf3f2207ebdd22ca')
+# 【修正】：這裡括號內必須是變數名稱，讓程式去 Render 的設定裡撈資料
+CHANNEL_ACCESS_TOKEN = os.environ.get("BteSrdaIB+E1biC82fx+pYO6aGuox4vj6BA4clTIWQehonm2aJYgrXynYWL+OLxCGVRB6yu0+FBXBZOVXMa6Bwm1LzZTqf++0QuHDuz9J1YOthtMzwhoLPxfhF21qoQaz5JRPyI0b6SryOp7wY6ihQdB04t89/1O/w1cDnyilFU=")
+CHANNEL_SECRET = os.environ.get("6a7107c2f4721cd0bf3f2207ebdd22ca")
+
+line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
+handler = WebhookHandler(CHANNEL_SECRET)
+
+# 用來記錄每個使用者的最後請求時間
+user_last_request_time = {}
+COOL_DOWN_TIME = 180  # 3 分鐘冷卻
 
 @app.route("/callback", methods=['POST'])
 def callback():
-    # 獲取簽名與內容
     signature = request.headers['X-Line-Signature']
     body = request.get_data(as_text=True)
-    
-    print("收到 LINE 的請求！") # 這行能幫助你除錯
-    
     try:
-        # 處理事件
         handler.handle(body, signature)
     except InvalidSignatureError:
-        print("❌ 簽名錯誤")
         abort(400)
     return 'OK'
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    # 獲取使用者訊息
-    user_msg = event.message.text
-    print(f"收到訊息: {user_msg}")
+    user_id = event.source.user_id
+    current_time = time.time()
     
-    # 呼叫 Test_AI 分析
-    reply_text = get_ai_analysis(user_msg)
+    # 檢查是否在 3 分鐘冷卻期內
+    last_time = user_last_request_time.get(user_id, 0)
+    if current_time - last_time < COOL_DOWN_TIME:
+        remaining_time = int(COOL_DOWN_TIME - (current_time - last_time))
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=f"⚠️ 請休息一下！機器人每 3 分鐘才能查詢一次，請在 {remaining_time} 秒後再試。")
+        )
+        return
+
+    # 執行查詢並記錄時間
+    user_last_request_time[user_id] = current_time
     
-    # 回覆 LINE
-    line_bot_api.reply_message(
-        event.reply_token,
-        TextSendMessage(text=reply_text)
-    )
+    try:
+        reply_text = get_ai_analysis(event.message.text)
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=reply_text)
+        )
+    except Exception as e:
+        error_msg = str(e)
+        if "429" in error_msg:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="❌ 目前 AI 請求過多，請 5 分鐘後再嘗試。")
+            )
+        else:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=f"❌ 系統發生錯誤，請稍後再試。")
+            )
 
 if __name__ == "__main__":
-    app.run(port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)

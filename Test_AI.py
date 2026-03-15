@@ -2,8 +2,11 @@ import yfinance as yf
 import google.generativeai as genai
 import os
 
-# 設定 Gemini API Key
-GEMINI_KEY = "AIzaSyD5bQNNQrEBmV8lbg5zoU0e74ZV2GmcQxI" 
+# 【修改處】：這裡改用 os.environ.get，確保金鑰不直接寫在程式碼中
+# 之後我們在 Render 設定時，會把這個 GEMINI_KEY 設定進去
+GEMINI_KEY = os.environ.get("GEMINI_KEY") 
+
+# 設定 API
 genai.configure(api_key=GEMINI_KEY, transport='rest')
 
 # 使用你清單中確認可用的模型
@@ -41,5 +44,7 @@ def get_ai_analysis(stock_id):
 
 # 測試用入口
 if __name__ == "__main__":
+    # 這裡為了讓你可以在本地端繼續測試，你可以暫時把 GEMINI_KEY 改回字串，
+    # 但記得上傳到 GitHub 前要改回 os.environ.get，或者在終端機先 export 該變數。
     code = input("請輸入股票代號 (例如 2330): ")
     print(get_ai_analysis(code))
