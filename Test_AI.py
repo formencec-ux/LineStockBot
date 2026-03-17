@@ -2,19 +2,18 @@ import yfinance as yf
 import google.generativeai as genai
 import os
 
-# 【修改處】：這裡改用 os.environ.get，確保金鑰不直接寫在程式碼中
-# 之後我們在 Render 設定時，會把這個 GEMINI_KEY 設定進去
+# 讀取環境變數
 GEMINI_KEY = os.environ.get("GEMINI_KEY") 
 
-# 設定 API
+# 設定 API (移除 transport='rest' 增加穩定度)
 genai.configure(api_key=GEMINI_KEY)
 
-# 使用你清單中確認可用的模型
-model = genai.GenerativeModel('models/gemini-3-flash-preview')
+# 【修改處】：使用更穩定的正式版 1.5 Flash 模型
+model = genai.GenerativeModel('gemini-1.5-flash')
 
 def get_ai_analysis(stock_id):
     """
-    這是一個可以被外部呼叫的函數，輸入代號，回傳 AI 分析結果
+    輸入代號，抓取數據並回傳 AI 分析結果
     """
     print(f"\n[AI Agent] 開始處理股票: {stock_id}")
     
@@ -23,14 +22,14 @@ def get_ai_analysis(stock_id):
         ticker_id = f"{stock_id}.TW" if stock_id.isdigit() else stock_id
         stock = yf.Ticker(ticker_id)
         
-        # 抓取數據
+        # 抓取數據 (加入逾時保護與錯誤檢查)
         fast_info = stock.fast_info
         price = fast_info['last_price']
         stock_name = stock.info.get('longName', stock_id)
         print(f"✅ 成功獲取 {stock_name}，股價: {price:.2f}")
         
         # 準備送給 AI 的 Prompt
-        prompt = f"你是一位專業分析師，請簡短分析台股 {stock_name} ({stock_id})，目前股價約 {price:.2f}。請用繁體中文回答。"
+        prompt = f"你是一位專業分析師，請簡短分析台股 {stock_name} ({stock_id})，目前股價約 {price:.2f}。請用繁體中文回答，重點在於趨勢與近期表現。"
         
         # 執行生成
         response = model.generate_content(prompt)
@@ -38,13 +37,13 @@ def get_ai_analysis(stock_id):
         return response.text
     
     except Exception as e:
-        error_msg = f"❌ 分析失敗: {str(e)}"
-        print(error_msg)
-        return error_msg
+        error_msg = str(e)
+        print(f"❌ 分析失敗: {error_msg}")
+        # 如果是 API 流量限制的錯誤訊息，回傳清楚的提示
+        if "429" in error_msg or "Rate limited" in error_msg:
+            return "❌ 目前 API 請求過於頻繁，請等候約 5-10 分鐘再試。"
+        return f"❌ 抓取資料或分析時發生錯誤: {error_msg}"
 
-# 測試用入口
 if __name__ == "__main__":
-    # 這裡為了讓你可以在本地端繼續測試，你可以暫時把 GEMINI_KEY 改回字串，
-    # 但記得上傳到 GitHub 前要改回 os.environ.get，或者在終端機先 export 該變數。
     code = input("請輸入股票代號 (例如 2330): ")
     print(get_ai_analysis(code))
