@@ -8,16 +8,16 @@ from Test_AI import get_ai_analysis
 
 app = Flask(__name__)
 
-# 從 Render 的 Environment 讀取正確的變數名稱
+# 從 Render 的 Environment 讀取設定
 CHANNEL_ACCESS_TOKEN = os.environ.get("CHANNEL_ACCESS_TOKEN")
 CHANNEL_SECRET = os.environ.get("CHANNEL_SECRET")
 
 line_bot_api = LineBotApi(CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(CHANNEL_SECRET)
 
-# 用來記錄每個使用者的最後請求時間
+# 記錄每個使用者的最後請求時間 (Key: user_id, Value: timestamp)
 user_last_request_time = {}
-# 【修改處】：冷卻時間延長至 300 秒 (5 分鐘)
+# 設定冷卻時間為 300 秒 (5 分鐘)
 COOL_DOWN_TIME = 300  
 
 @app.route("/callback", methods=['POST'])
@@ -33,34 +33,47 @@ def callback():
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     user_id = event.source.user_id
+    user_msg = event.message.text.strip()
     current_time = time.time()
     
-    # 檢查是否在冷卻期內
-    last_time = user_last_request_time.get(user_id, 0)
-    if current_time - last_time < COOL_DOWN_TIME:
-        remaining_time = int(COOL_DOWN_TIME - (current_time - last_time))
+    print(f"--- 收到訊息: {user_msg} (來自: {user_id}) ---")
+
+    # 1. 偵測模式：如果輸入「測試」，直接回覆，不計入冷卻
+    if user_msg == "測試":
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text=f"⚠️ 查詢太頻繁囉！為了維持 AI 穩定，請在 {remaining_time} 秒後再試。")
+            TextSendMessage(text="✅ 伺服器連線正常！請嘗試輸入股票代號（例如 2330）。")
         )
         return
 
-    # 記錄本次請求時間並執行
+    # 2. 檢查冷卻時間
+    last_time = user_last_request_time.get(user_id, 0)
+    if current_time - last_time < COOL_DOWN_TIME:
+        remaining = int(COOL_DOWN_TIME - (current_time - last_time))
+        print(f"仍在冷卻中，剩餘 {remaining} 秒")
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=f"⚠️ 查詢太頻繁囉！請在 {remaining} 秒後再嘗試查詢下一支股票。")
+        )
+        return
+
+    # 3. 通過檢查，執行 AI 分析
+    # 先更新時間，避免在 AI 跑的時候又有訊息塞進來
     user_last_request_time[user_id] = current_time
     
     try:
-        reply_text = get_ai_analysis(event.message.text)
+        reply_text = get_ai_analysis(user_msg)
         line_bot_api.reply_message(
             event.reply_token,
             TextSendMessage(text=reply_text)
         )
     except Exception as e:
-        print(f"LINE 回覆發生錯誤: {str(e)}")
-        # 發生錯誤時重設時間，讓使用者不用白等 5 分鐘
-        user_last_request_time[user_id] = 0 
+        print(f"❌ 系統錯誤: {e}")
+        # 發生錯誤時重設時間，讓使用者不用白等
+        user_last_request_time[user_id] = 0
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text="❌ 系統繁忙或發生錯誤，請稍候片刻再試。")
+            TextSendMessage(text="❌ 系統暫時無法處理您的請求，請稍候片刻。")
         )
 
 if __name__ == "__main__":
