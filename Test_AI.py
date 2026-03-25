@@ -28,7 +28,7 @@ def get_ai_analysis(stock_id):
             "Content-Type": "application/json"
         }
         
-        # 【關鍵修正】：使用最新、沒下架的模型 llama-3.1-8b-instant
+        # 【關鍵修正】：模型換成最新的 llama-3.1-8b-instant
         payload = {
             "model": "llama-3.1-8b-instant",
             "messages": [
@@ -59,6 +59,3 @@ def get_ai_analysis(stock_id):
     except Exception as e:
         print(f"❌ 發生異常: {str(e)}")
         return f"❌ 分析失敗: {str(e)}"
-
-if __name__ == "__main__":
-    print(get_ai_analysis("2330"))
