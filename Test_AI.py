@@ -1,31 +1,23 @@
-import yfinance as yf
 import requests
 import os
 
-# 放到函式外面，確保啟動時就讀取
 GROQ_KEY = os.environ.get("GROQ_KEY")
 
 def get_ai_analysis(stock_id):
-    # 偵錯用：印出 Key 的前三個字 (確保有讀到，又不外流)
-    key_check = str(GROQ_KEY)[:3] if GROQ_KEY else "無"
-    print(f"\n[AI] 啟動 Groq 分析. 代號: {stock_id}, Key檢查: {key_check}...")
-
-    if not GROQ_KEY or len(GROQ_KEY) < 10:
-        return "❌ 系統錯誤：Render 環境變數 GROQ_KEY 設定不正確或未讀取。"
+    print(f"\n[AI] 進入純 AI 測試階段. 代號: {stock_id}")
+    
+    if not GROQ_KEY:
+        return "❌ 系統錯誤：找不到 GROQ_KEY。"
 
     try:
-        ticker_id = f"{stock_id}.TW" if stock_id.isdigit() else stock_id
-        stock = yf.Ticker(ticker_id)
-        price_history = stock.history(period="1d")
-        
-        if price_history.empty:
-            return f"❌ 找不到股票 {stock_id} 的價格。"
-            
-        price = price_history['Close'].iloc[-1]
+        # --- 暫時不用 yfinance，直接給一個固定股價測試 ---
+        test_price = 265.0 
+        print(f"[AI] 略過抓取，直接使用測試股價: {test_price}")
 
+        # 呼叫 Groq API
         url = "https://api.groq.com/openai/v1/chat/completions"
         headers = {
-            "Authorization": f"Bearer {GROQ_KEY.strip()}", # 增加 .strip() 自動去掉可能存在的空格
+            "Authorization": f"Bearer {GROQ_KEY.strip()}",
             "Content-Type": "application/json"
         }
         
@@ -33,19 +25,20 @@ def get_ai_analysis(stock_id):
             "model": "llama3-8b-8192",
             "messages": [
                 {"role": "system", "content": "你是一位台股分析師，請用繁體中文回覆，約 60 字。"},
-                {"role": "user", "content": f"分析台股 {stock_id}，股價 {price:.2f}。"}
+                {"role": "user", "content": f"分析台股 {stock_id}，目前股價約 {test_price}。"}
             ]
         }
 
+        print("[AI] 正在直連 Groq API...")
         response = requests.post(url, headers=headers, json=payload, timeout=10)
         
         if response.status_code == 200:
             result = response.json()
             return result['choices'][0]['message']['content']
         else:
-            # 這裡會印出更詳細的錯誤原因
-            print(f"❌ Groq API 詳細錯誤: {response.text}")
-            return f"❌ 服務暫時繁忙 (代碼 {response.status_code})，請稍後再試。"
+            print(f"❌ Groq 錯誤: {response.status_code} - {response.text}")
+            return f"⚠️ AI 暫時無法回應 (代碼 {response.status_code})"
 
     except Exception as e:
-        return f"❌ 程式異常: {str(e)}"
+        print(f"❌ 異常發生: {str(e)}")
+        return f"❌ 異常: {str(e)}"
