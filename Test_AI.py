@@ -1,4 +1,3 @@
-import yfinance as yf
 import requests
 import os
 
@@ -7,76 +6,81 @@ GROQ_KEY = os.environ.get("GROQ_KEY")
 
 def get_ai_analysis(stock_id):
     """
-    輸入股票代號，執行資深投資分析助理的專業分析流程
+    輸入股票代號，先透過 Yahoo API 定錨公司名稱與股價，再由 AI Agent 執行分析
     """
-    print(f"\n[AI] 啟動直連版分析流程: {stock_id}")
+    print(f"\n[AI] 啟動全方位分析流程: {stock_id}")
     
     try:
-        # 1. 檢查 API Key 是否存在
         if not GROQ_KEY:
             return "❌ 系統錯誤：找不到 GROQ_KEY。"
 
-        # 2. 抓取股價資料 (採用直連 Yahoo API 避免 IP 封鎖)
-        # 判斷輸入是否為純數字，若是則自動加上台股後綴 .TW
+        # --- 第一階段：抓取股價與正確的公司名稱 (定錨關鍵) ---
         ticker_id = f"{stock_id}.TW" if stock_id.isdigit() else stock_id
         url_yahoo = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker_id}"
-        headers_yahoo = {"User-Agent": "Mozilla/5.0"} # 偽裝成一般瀏覽器
+        headers_yahoo = {"User-Agent": "Mozilla/5.0"} 
         
-        print(f"[AI] 正在直連 Yahoo 抓取資料: {ticker_id}")
+        print(f"[AI] 正在從 Yahoo 獲取即時數據: {ticker_id}")
         resp_yahoo = requests.get(url_yahoo, headers=headers_yahoo, timeout=10)
         
         if resp_yahoo.status_code == 200:
             data = resp_yahoo.json()
+            # 取得最新股價
             price = data['chart']['result'][0]['meta']['regularMarketPrice']
-            print(f"[AI] 成功獲取價格: {price:.2f}")
+            # 取得公司名稱 (這能有效告訴 AI 它是 4958 而不是 2330)
+            # symbol 通常回傳代號，如果 API 有回傳 shortName 則更佳
+            stock_name = data['chart']['result'][0]['meta'].get('symbol', stock_id).replace(".TW", "")
+            print(f"[AI] 資料定錨成功 -> 代號: {stock_id}, 股價: {price:.2f}")
         else:
-            # 拒絕機制：如果是非台股或錯誤代碼，給予溫柔提醒
             print(f"❌ Yahoo API 報錯: {resp_yahoo.status_code}")
             return "⚠️ 提醒：目前僅支援台股查詢（如 2330），請確認代號是否正確。"
 
-        # 3. AI Agent 提示詞設定 (角色設定與任務指令)
+        # --- 第二階段：AI Agent 提示詞設定 (強化防誤判邏輯) ---
         system_prompt = """
         角色設定：你是一位精通全球資本市場的「資深投資分析助理」。你擅長結合即時財務數據（量化）與市場新聞趨勢（質化），為投資人提供客觀、冷靜且具備洞察力的分析建議。
 
         🛠 任務指令：
         當使用者輸入一個股票代號時，請嚴格執行以下三個分析步驟：
-
+        
         第一步：多維度財務與籌碼掃描
         1. 估值指標：報告目前股價、目前的 PE Ratio (本益比)，並說明該數值位於歷史區間的相對位置（高/中/低）。
         2. 籌碼與動能：簡述法人與大戶進出趨勢。
         3. 業務動態：摘要最近營收表現與核心業務增長點。
 
-        第二步：Google News 即時新聞摘要 (模擬最新趨勢)
-        1. 針對最近期 3 則關鍵新聞提供：標題、關鍵摘要。
+        第二步：Google News 即時新聞摘要 (請根據指定的正確公司進行分析)
+        1. 針對該公司最近期 3 則關鍵新聞提供：標題、關鍵摘要。
         2. 分析新聞對股價的潛在影響（利多/利空/中立）。
 
-        第三步：投資人視視角綜合評估
-        先分析營收狀況，再給予趨勢預測。基於上述數據，以投資人立場給予建議。必須涵蓋以下三種場景之一：
-        【適合投資】、【不適合投資】或【策略性等待】。
+        第三步：投資人視角綜合評估
+        先分析營收狀況，再給予趨勢預測。必須從【適合投資】、【不適合投資】或【策略性等待】中擇一。
 
         📋 回覆格式規範：
-        請使用 Markdown 格式輸出，標題為：📈 [股票代號/名稱] 全方位分析報告。
+        使用 Markdown 輸出標題：📈 [股票代號/正確公司名稱] 全方位分析報告。
 
-        p.s 拒絕機制：如果輸入的代號不是台股，請溫柔地提醒使用者只支援台股查詢。
+        ⚠️ 核心警告：
+        請嚴格遵守「輸入代號即為分析對象」的原則。如果收到的是 4958，絕對不可分析為 2330 或其他公司。若代號非台股，請溫柔提醒僅支援台股。
         """
 
-        # 4. 呼叫 Groq API (整合 Llama 3.1 模型)
+        # --- 第三階段：呼叫 Groq API ---
         url_groq = "https://api.groq.com/openai/v1/chat/completions"
         headers_groq = {
             "Authorization": f"Bearer {GROQ_KEY.strip()}",
             "Content-Type": "application/json"
         }
         
+        # 在 User Message 中強迫點名公司名稱與代號
         payload = {
             "model": "llama-3.1-8b-instant",
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"分析台股 {stock_id}，目前股價約 {price:.2f} 元。請開始執行三步驟全方位分析。"}
+                {
+                    "role": "user", 
+                    "content": f"現在請分析台股代號 [{stock_id}]。請注意，這不是台積電或其他公司。目前最新股價為 {price:.2f} 元。請開始執行三步驟報告。"
+                }
             ],
-            "temperature": 0.3 # 較低的溫度確保分析報告更具專業穩定性
+            "temperature": 0.2 # 降低溫度以減少 AI 自作聰明的幻覺
         }
 
-        print("[AI] 正在向 Groq 發送請求 (Agent 模式)...")
+        print(f"[AI] 正在發送請求至 Groq (已加入防誤判指令)...")
         resp_groq = requests.post(url_groq, headers=headers_groq, json=payload, timeout=20)
         
         if resp_groq.status_code == 200:
@@ -84,16 +88,8 @@ def get_ai_analysis(stock_id):
             print("[AI] 分析報告生成成功")
             return ai_content
         else:
-            print(f"❌ Groq 報錯: {resp_groq.text}")
             return f"❌ AI 分析暫時無法執行 (代碼 {resp_groq.status_code})"
 
     except Exception as e:
-        error_msg = str(e)
-        print(f"❌ 發生異常: {error_msg}")
-        if "Too Many Requests" in error_msg:
-            return "⚠️ 資料抓取過於頻繁，請 5 分鐘後再試。"
-        return f"❌ 系統發生預期外錯誤，請稍後再試。"
-
-if __name__ == "__main__":
-    # 本地測試範例
-    print(get_ai_analysis("2330"))
+        print(f"❌ 發生異常: {str(e)}")
+        return "❌ 系統分析失敗，請檢查網路連線或稍後再試。"
