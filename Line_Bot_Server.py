@@ -1,7 +1,7 @@
 import os
 import time
-import threading
-import re  # 新增：用於提取文字中的股票代號
+import threading  # 用於異步處理，避免 Line 逾時
+import re         # 用於提取文字中的股票代號
 from flask import Flask, request, abort
 from linebot import LineBotApi, WebhookHandler
 from linebot.exceptions import InvalidSignatureError
@@ -10,7 +10,7 @@ from Test_AI import get_ai_analysis
 
 app = Flask(__name__)
 
-# 讀取金鑰
+# 讀取系統環境變數金鑰
 CHANNEL_ACCESS_TOKEN = os.environ.get("CHANNEL_ACCESS_TOKEN")
 CHANNEL_SECRET = os.environ.get("CHANNEL_SECRET")
 
@@ -32,21 +32,6 @@ def callback():
         abort(400)
     return 'OK'
 
-def async_ai_analysis(user_id, user_msg):
-    """
-    異步執行函數：在背景執行 AI 分析並使用 push_message 回傳
-    """
-    try:
-        print(f"[AI] 背景任務啟動，正在分析: {user_msg}")
-        reply_text = get_ai_analysis(user_msg)
-        
-        # 使用 push_message 將詳細報告送回給使用者
-        line_bot_api.push_message(user_id, TextSendMessage(text=reply_text))
-        print(f"[LINE] 分析報告已推送至用戶: {user_id}")
-    except Exception as e:
-        print(f"[LINE] 背景執行錯誤: {e}")
-        line_bot_api.push_message(user_id, TextSendMessage(text="❌ 分析過程中發生錯誤，請稍後再試。"))
-
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     msg_id = event.message.id
@@ -65,15 +50,33 @@ def handle_message(event):
         line_bot_api.reply_message(event.reply_token, TextSendMessage(text="✅ 伺服器運作中！"))
         return
 
-    # 3. 提取訊息中的 4 位數股票代號
+    # 3. 檢查訊息中是否有現成的 4 位數股票代號
     stock_match = re.search(r'\d{4}', user_msg)
+    
+    # 🌟【對話接力功能】如果用戶只回覆肯定的引導詞，表示要沿用上一輪的股票代號
+    lead_words = ["好", "要", "想看", "新聞", "好的", "可以", "繼續", "分析"]
+    is_lead_word = any(word in user_msg for word in lead_words)
+    
+    final_query_msg = user_msg  # 最後要丟給 AI 的字串
+    
+    # 如果使用者沒輸入數字，但是講了「好啊」之類的引導詞
+    if not stock_match and is_lead_word:
+        import db_helper
+        # 去資料庫撈出這個人上一輪問的是哪一檔
+        remembered_id = db_helper.get_user_last_stock(user_id)
+        if remembered_id:
+            # 自動把代號補在前面，變成（例如：「3189 好啊」）
+            final_query_msg = f"{remembered_id} {user_msg}"
+            # 重新建立 stock_match，這樣就能順利通過下方的股票檢查
+            stock_match = re.search(r'\d{4}', final_query_msg)
+            print(f"[記憶觸發] 用戶輸入『{user_msg}』，系統自動綁定上一次查詢的代號: {remembered_id}")
 
-    # 4. 判斷邏輯修改
+    # 4. 判斷是否為有效股票代號指令並執行分析
     if stock_match:
-        # 檢查冷卻時間
         current_time = time.time()
         last_time = user_last_request_time.get(user_id, 0)
         
+        # 檢查冷卻時間
         if current_time - last_time < COOL_DOWN_TIME:
             remaining = int(COOL_DOWN_TIME - (current_time - last_time))
             line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"⏳ 助理正在整理數據中，請稍候 {remaining} 秒後再查詢。"))
@@ -81,21 +84,32 @@ def handle_message(event):
 
         user_last_request_time[user_id] = current_time
         
-        # 先立刻回覆使用者
-        found_id = stock_match.group()
+        # 立刻回覆使用者，防止 Webhook 超時掛掉
         line_bot_api.reply_message(
             event.reply_token, 
-            TextSendMessage(text=f"🔍 已偵測到代號 {found_id}，分析助理正在思考您的問題，請稍候約 10-15 秒...")
+            TextSendMessage(text="🔍 好的，私人助理已收到指令，正在為您整理數據中，請稍候約 10 秒...")
         )
 
-        # 啟動異步處理
-        thread = threading.Thread(target=async_ai_analysis, args=(user_id, user_msg))
+        # 建立非同步分析包裹器，將 user_id 傳進去存對話紀錄
+        def async_ai_analysis_wrapper(uid, msg):
+            try:
+                print(f"[AI] 背景任務啟動，正在處理: {msg}")
+                reply_text = get_ai_analysis(msg, uid)  # 將 uid 傳入 Test_AI
+                line_bot_api.push_message(uid, TextSendMessage(text=reply_text))
+                print(f"[LINE] 助理報告已成功推送到用戶: {uid}")
+            except Exception as e:
+                print(f"[LINE] 背景執行錯誤: {e}")
+                line_bot_api.push_message(uid, TextSendMessage(text="❌ 報告主人，助理在後台整理資料時不小心跌倒了，請再試一次。"))
+
+        # 開啟執行緒 (Thread) 在背景執行
+        thread = threading.Thread(target=async_ai_analysis_wrapper, args=(user_id, final_query_msg))
         thread.start()
+        
     else:
-        # 如果訊息中完全沒有 4 位數字，才顯示提示
+        # 如果訊息中完全沒有 4 位數字，且不是引導詞
         line_bot_api.reply_message(
             event.reply_token, 
-            TextSendMessage(text="💡 請輸入包含 4 位數台股代號的訊息（例如：2330 股價如何），我將為您進行精準分析。")
+            TextSendMessage(text="💡 提示：請輸入包含 4 位數台股代號的指令（例如：3189 多少錢），讓助理為您服務喔！")
         )
 
 if __name__ == "__main__":
