@@ -6,6 +6,11 @@ import db_helper  # 引入我們在第一步寫好的資料庫助手
 # 從 Render 的系統環境變數中讀取 Groq API 金鑰
 GROQ_KEY = os.environ.get("GROQ_KEY")
 
+try:
+    db_helper.init_db()
+except Exception as db_err:
+    print(f"[DB] 自動初始化提示 (可能已存在): {db_err}")
+
 def get_ai_analysis(user_input):
     """
     輸入使用者發送的訊息（包含自然語言），偵測代號、儲存數據，並以助理口吻回覆
@@ -114,5 +119,10 @@ def get_ai_analysis(user_input):
             return f"❌ 報告主人，AI 助理在思考時遇到了點小麻煩 (錯誤碼 {resp_groq.status_code})，請稍後再試試看。"
 
     except Exception as e:
-        print(f"❌ 發生異常: {str(e)}")
-        return "❌ 報告主人，系統連線失敗，請檢查網路或稍後再試。"
+        # 這裡會印出詳細錯誤在後台
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"❌ 發生致命異常:\n{error_detail}")
+        
+        # 直接把錯誤原因回傳到 LINE，方便我們一秒抓漏
+        return f"❌ 報告主人，系統發生異常！\n錯誤類型：{type(e).__name__}\n詳細原因：{str(e)}\n\n請把這段訊息貼給開發者確認。"
