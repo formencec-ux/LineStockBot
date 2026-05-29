@@ -20,7 +20,12 @@ handler = WebhookHandler(CHANNEL_SECRET)
 # 狀態記錄
 user_last_request_time = {}
 processed_msg_ids = set() 
-COOL_DOWN_TIME = 120  # 冷卻時間維持 2 分鐘
+
+# =========================================================
+# ✨ 任務修改：將提問冷卻時間縮短為 30 秒
+# =========================================================
+COOL_DOWN_TIME = 30  
+# =========================================================
 
 @app.route("/callback", methods=['POST'])
 def callback():
@@ -53,7 +58,7 @@ def handle_message(event):
     # 3. 檢查訊息中是否有現成的 4 位數股票代號
     stock_match = re.search(r'\d{4}', user_msg)
     
-    # 🌟【對話接力功能】如果用戶只回覆肯定的引導詞，表示要沿用上一輪的股票代號
+    # 【對話接力功能】如果用戶只回覆肯定的引導詞，表示要沿用上一輪的股票代號
     lead_words = ["好", "要", "想看", "新聞", "好的", "可以", "繼續", "分析"]
     is_lead_word = any(word in user_msg for word in lead_words)
     
@@ -62,7 +67,7 @@ def handle_message(event):
     # 如果使用者沒輸入數字，但是講了「好啊」之類的引導詞
     if not stock_match and is_lead_word:
         import db_helper
-        # 去資料庫撈出這個人上一輪問的是哪一檔
+        # 去資料庫撈出這個人最近 5 次對話中最後問的是哪一檔
         remembered_id = db_helper.get_user_last_stock(user_id)
         if remembered_id:
             # 自動把代號補在前面，變成（例如：「3189 好啊」）
@@ -76,10 +81,10 @@ def handle_message(event):
         current_time = time.time()
         last_time = user_last_request_time.get(user_id, 0)
         
-        # 檢查冷卻時間
+        # 檢查冷卻時間 (目前已改為 30 秒)
         if current_time - last_time < COOL_DOWN_TIME:
             remaining = int(COOL_DOWN_TIME - (current_time - last_time))
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"⏳ 助理正在整理數據中，請稍候 {remaining} 秒後再查詢。"))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(text=f"⏳ 助理正在幫您整理大數據中，請稍候 {remaining} 秒後再查詢。"))
             return
 
         user_last_request_time[user_id] = current_time
